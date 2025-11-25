@@ -49,7 +49,6 @@ onMessage('activity', (message) => {
     const data = message.data;
     if (data.label_id) {
         fbxAction.value = data.label_id
-        console.log('最新的fbxaction', fbxAction.value)
     }
 });
 </script>

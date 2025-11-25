@@ -1,84 +1,112 @@
 import type { WebSocketMessage } from '../types/websocket';
 import { ref } from 'vue'
 export const userInfo = ref('')
-// 模拟WebSocket的类
+// WebSocket连接管理类
 export class WebSocketSimulator {
   private listeners: Map<string, Array<(message: WebSocketMessage) => void>> = new Map();
-  private intervalId: number | null = null;
+  private ws: WebSocket | null = null;
   private isConnected = false;
+  private reconnectInterval = 5000; // 重连间隔，毫秒
+  private reconnectTimer: number | null = null;
+  private messageCount = 0; // 消息计数器
+  private readonly maxMessageLogs = 50; // 最大打印消息数量
 
-  // 连接模拟WebSocket
+  // 连接到WebSocket服务器
   connect(): void {
-    if (this.isConnected) return;
-    this.isConnected = true;
-    // 开始模拟消息推送，每2秒发送一个随机消息
-    this.intervalId = window.setInterval(() => {
-      this.sendRandomMessage({
-        type: 'ecg_stream',
-        data: {
-          user_id: 'u1',
-          fs_hz: 100,
-          t: Date.now(),
-          easi_ai: Math.random() * 0.001 + 0.001 * Math.random(),
-          easi_es: Math.random() * 0.002,
-          easi_as: Math.random() * 0.002
-        }
-      },);
-    }, 100);
-
-    window.setInterval(() => {
-      this.sendRandomMessage({
-        type: 'activity',
-        data: {
-          user_id: 'u1',
-          label: 'sit',
-          label_id: Math.floor(Math.random() * 8),
-          probs: { sit: 0.92, stand: 0.05, lie: 0.03 },
-          win: 200,
-          hop: 50,
-          fs_hz: 100,
-          ts: Date.now()
-        }
-      },);
-    }, 2500);
-
-    window.setInterval(() => {
-      this.sendRandomMessage({
-        type: 'ecg_update',
-        data: {
-          user_id: 'u1',
-          fs_hz: 100,
-          rpeak_count: Math.floor(Math.random() * 10) + 120,
-          hr_mean_bpm: Math.random() * 20 + 60,
-          sdnn_ms: Math.random() * 20 + 30,
-          rmssd_ms: Math.random() * 20 + 30,
-          resp_rate_bpm: Math.random() * 5 + 10,
-          win_samples: 2000,
-          ts: Date.now()
-        }
-      },);
-      this.sendRandomMessage(
-        {
-          type: 'temp_update',
-          data: {
-            user_id: 'u1',
-            object_c: Math.random() * 5 + 30,
-            ambient_c: Math.random() * 5 + 25,
-            smoothed_object_c: Math.random() * 5 + 30,
-            alarm: null,
-            ts: Date.now()
+    if (this.isConnected || this.ws?.readyState === WebSocket.OPEN) return;
+    
+    try {
+      const websocketUrl = import.meta.env.VITE_WEBSOCKET_URL || 'ws://localhost:8080';
+      this.ws = new WebSocket(websocketUrl);
+      
+      this.ws.onopen = () => {
+        console.log('WebSocket连接已建立');
+        this.isConnected = true;
+      };
+      
+      this.ws.onmessage = (event) => {
+       try {
+         const message: WebSocketMessage = JSON.parse(event.data);
+         // 控制打印次数，最多50条消息
+         if (this.messageCount < this.maxMessageLogs) {
+           console.log('收到WebSocket消息:', message);
+           this.messageCount++;
+         }
+         // 只有非错误消息才包含 user_id
+          if(message.type !== 'error' && message.data && 'user_id' in message.data){
+            userInfo.value = message.data.user_id;
           }
-        });
-    }, 1000);
+          // 触发对应的监听器
+          const listeners = this.listeners.get(message.type);
+          if (listeners) {
+            listeners.forEach(listener => listener(message));
+          }
+        } catch (error) {
+          console.error('解析WebSocket消息失败:', error);
+        }
+      };
+      
+      this.ws.onerror = (error) => {
+        console.error('WebSocket错误:', error);
+        this.isConnected = false;
+      };
+      
+      this.ws.onclose = () => {
+        console.log('WebSocket连接已关闭');
+        this.isConnected = false;
+        this.scheduleReconnect();
+      };
+    } catch (error) {
+      console.error('创建WebSocket连接失败:', error);
+      this.scheduleReconnect();
+    }
   }
 
-  // 断开模拟WebSocket
+  // 断开WebSocket连接
   disconnect(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
     }
     this.isConnected = false;
+  }
+
+  // 安排重连
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    
+    this.reconnectTimer = window.setTimeout(() => {
+      console.log('尝试重连WebSocket...');
+      this.reconnectTimer = null;
+      this.connect();
+    }, this.reconnectInterval);
+  }
+
+  // 发送消息到WebSocket服务器
+  send(message: WebSocketMessage): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify(message));
+      } catch (error) {
+        console.error('发送WebSocket消息失败:', error);
+      }
+    } else {
+      console.warn('WebSocket未连接，无法发送消息');
+    }
+  }
+
+  // 手动发送特定消息（可选，用于测试）
+  // 注意：这个方法不会通过WebSocket发送，而是直接触发本地监听器
+  sendMessage(message: WebSocketMessage): void {
+    const listeners = this.listeners.get(message.type);
+    if (listeners) {
+      listeners.forEach(listener => listener(message));
+    }
   }
 
   // 监听消息类型
@@ -107,25 +135,6 @@ export class WebSocketSimulator {
     }
   }
 
-  // 发送随机消息（用于模拟）
-  private sendRandomMessage(message: any): void {
-    if(message.data && message.data.user_id){
-      userInfo.value = message.data.user_id
-    }
-    // 触发对应的监听器
-    const listeners = this.listeners.get(message.type);
-    if (listeners) {
-      listeners.forEach(listener => listener(message));
-    }
-  }
-
-  // 手动发送特定消息（可选，用于测试）
-  sendMessage(message: WebSocketMessage): void {
-    const listeners = this.listeners.get(message.type);
-    if (listeners) {
-      listeners.forEach(listener => listener(message));
-    }
-  }
 }
 
 // 导出单例实例

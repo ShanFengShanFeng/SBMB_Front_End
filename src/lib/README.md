@@ -1,69 +1,88 @@
-# WebSocket 模拟器
+# WebSocket 连接器使用说明
 
-这个模块提供了一个模拟WebSocket的功能，用于处理特定类型的消息。
+## 概述
 
-## 消息类型
-
-1. **activity**: 活动识别结果（实时）
-2. **alarm / alarm_clear**: 姿态异常告警与清除
-3. **ecg_stream**: 去噪后EASI三导ECG数据流
-4. **ecg_update**: ECG指标更新
-5. **temp_update**: 实时温度信息与告警
-6. **error**: 错误信息
+`websocketSimulator.ts` 已从模拟WebSocket改为真实WebSocket连接器，可以连接到本地运行的WebSocket服务器。
 
 ## 使用方法
 
-### 1. 在Vue组件中使用
+### 1. 启动WebSocket服务器
 
-```vue
-<script setup>
-import { useWebSocketSimulator } from '@/composables/useWebSocketSimulator';
+首先需要启动WebSocket模拟服务器：
 
-const { messages, isConnected, connect, disconnect, onMessage, clearMessages } = useWebSocketSimulator();
+```bash
+# 启动WebSocket服务器
+pnpm websocket
 
-// 监听特定消息类型
-onMessage('activity', (msg) => {
-  console.log('收到活动消息:', msg);
-});
-
-// 连接WebSocket
-connect();
-
-// 断开WebSocket
-disconnect();
-
-// 清空消息
-clearMessages();
-</script>
+# 或者使用启动脚本
+pnpm websocket:start
 ```
 
-### 2. 直接使用模拟器类
+服务器默认运行在 `ws://localhost:8080` 端口。
+
+### 2. 在Vue组件中使用
 
 ```typescript
 import { websocketSimulator } from '@/lib/websocketSimulator';
 
-// 连接
+// 连接到WebSocket服务器
 websocketSimulator.connect();
 
 // 监听消息
-websocketSimulator.on('activity', (message) => {
-  console.log('Activity message:', message);
+websocketSimulator.on('ecg_stream', (message) => {
+  console.log('收到ECG数据:', message);
 });
 
-// 断开
+websocketSimulator.on('activity', (message) => {
+  console.log('收到活动数据:', message);
+});
+
+websocketSimulator.on('ecg_update', (message) => {
+  console.log('收到ECG更新:', message);
+});
+
+websocketSimulator.on('temp_update', (message) => {
+  console.log('收到体温数据:', message);
+});
+
+// 发送消息到服务器
+websocketSimulator.send({
+  type: 'subscribe',
+  data: {
+    channels: ['ecg_stream', 'activity']
+  }
+});
+
+// 断开连接
 websocketSimulator.disconnect();
 ```
 
-## 功能特点
+### 3. 可用的方法
 
-- 自动模拟随机消息推送（每2秒一个消息）
-- 支持监听特定消息类型
-- 提供连接状态管理
-- 消息历史记录
-- TypeScript类型安全
+- `connect()`: 连接到WebSocket服务器
+- `disconnect()`: 断开WebSocket连接
+- `on(type, callback)`: 监听特定类型的消息
+- `off(type, callback?)`: 移除监听器
+- `send(message)`: 发送消息到WebSocket服务器
+- `sendMessage(message)`: 本地测试方法，直接触发监听器
+
+## 消息类型
+
+支持的消息类型包括：
+
+- `ecg_stream`: ECG心电图流数据
+- `activity`: 活动识别数据
+- `ecg_update`: ECG统计更新数据
+- `temp_update`: 体温监测数据
+- `error`: 错误消息
+
+## 错误处理
+
+连接器包含自动重连机制，当连接断开时会自动尝试重连。重连间隔默认为5秒。
 
 ## 注意事项
 
-- 这是一个模拟器，用于开发和测试目的
-- 消息数据是随机生成的
-- 可以手动发送特定消息用于测试
+1. 确保WebSocket服务器正在运行
+2. 连接器会自动处理重连逻辑
+3. 所有消息都使用JSON格式传输
+4. 支持多个监听器同时监听同一种消息类型
