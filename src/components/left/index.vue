@@ -356,7 +356,7 @@ const tempOption = computed(() => {
 
 // 格式化数值显示
 function formatNumber(value: number, decimals: number = 1): string {
-    return value.toFixed(decimals)
+    return value <= 0 ? "\\" : value.toFixed(decimals)
 }
 
 onMounted(() => {
